@@ -175,7 +175,7 @@ export const StoryCard: React.FC<StoryCardProps> = ({ story, onOpenDetails }) =>
             className="flex items-center gap-1.5 text-xs font-bold text-gold hover:text-gold-light transition"
           >
             <BookOpen className="w-3.5 h-3.5" />
-            <span>קרא את הכתבה המלאה באפליקציה</span>
+            <span>לכתבה המלאה</span>
             <ChevronLeft className="w-3.5 h-3.5" />
           </button>
 
