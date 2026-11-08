@@ -12,11 +12,11 @@ interface CategoryBarProps {
 const CATEGORY_ITEMS: { id: SportCategory; label: string; icon: React.ReactNode }[] = [
   { id: "all", label: "הכל", icon: <Flame className="w-3.5 h-3.5" /> },
   { id: "israeli-football", label: "כדורגל ישראלי", icon: <Trophy className="w-3.5 h-3.5" /> },
-  { id: "uefa-tournaments", label: "אירופה ונבחרות", icon: <Globe className="w-3.5 h-3.5" /> },
+  { id: "uefa-tournaments", label: "אירופה ומפעלים", icon: <Globe className="w-3.5 h-3.5" /> },
   { id: "euroleague", label: "יורוליג", icon: <Shield className="w-3.5 h-3.5" /> },
   { id: "nba", label: "NBA", icon: <Zap className="w-3.5 h-3.5" /> },
   { id: "israeli-basketball", label: "כדורסל ישראלי", icon: <Activity className="w-3.5 h-3.5" /> },
-  { id: "global-stories", label: "סיפורי מגזין", icon: <BookOpen className="w-3.5 h-3.5" /> },
+  { id: "global-stories", label: "טניס וספורט עולמי", icon: <BookOpen className="w-3.5 h-3.5" /> },
 ];
 
 export const CategoryBar: React.FC<CategoryBarProps> = ({

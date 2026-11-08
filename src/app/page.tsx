@@ -66,7 +66,10 @@ export default function Home() {
     setActiveModalArticle(null);
   };
 
-  // Filter stories based on selected category & feed tab
+  const handleSelectCategory = (cat: SportCategory) => {
+    setSelectedCategory(cat);
+    setActiveFeedTab("all");
+  };
   const filteredStories = stories.filter((story) => {
     // Category filter
     if (selectedCategory !== "all" && story.category !== selectedCategory) {
@@ -103,7 +106,7 @@ export default function Home() {
       {/* Horizontal Category Chips */}
       <CategoryBar
         selectedCategory={selectedCategory}
-        onSelectCategory={setSelectedCategory}
+        onSelectCategory={handleSelectCategory}
       />
 
       {/* Live Firestore Ingestion Banner */}
