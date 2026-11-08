@@ -8,8 +8,8 @@ import { StoryDetailModal } from "@/components/StoryDetailModal";
 import { BottomNav } from "@/components/BottomNav";
 import { MOCK_STORIES } from "@/data/mockStories";
 import { SportCategory, Story, SourceArticle } from "@/types/story";
-import { subscribeToStories } from "@/lib/firestoreService";
-import { Filter, CloudCheck } from "lucide-react";
+import { subscribeToStories, getStoriesFromFirestore } from "@/lib/firestoreService";
+import { Filter, CheckCircle2 } from "lucide-react";
 
 export default function Home() {
   const [stories, setStories] = useState<Story[]>(MOCK_STORIES);
@@ -42,9 +42,9 @@ export default function Home() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      const res = await fetch("/api/refresh");
-      const data = await res.json();
-      if (data.status === "success") {
+      const latestStories = await getStoriesFromFirestore();
+      if (latestStories && latestStories.length > 0) {
+        setStories(latestStories);
         setLastUpdatedText("עודכן עכשיו מסונכרן");
       }
     } catch (err) {
@@ -52,7 +52,7 @@ export default function Home() {
     } finally {
       setTimeout(() => {
         setIsRefreshing(false);
-      }, 600);
+      }, 500);
     }
   };
 
