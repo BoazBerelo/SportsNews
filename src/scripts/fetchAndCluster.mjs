@@ -23,33 +23,89 @@ const FEEDS = [
     sourceId: "walla",
     sourceName: "וואלה! ספורט",
     sourceLang: "he",
+    isInternational: false,
     url: "https://rss.walla.co.il/feed/156",
   },
   {
     sourceId: "ynet",
     sourceName: "Ynet ספורט",
     sourceLang: "he",
+    isInternational: false,
     url: "https://www.ynet.co.il/Integration/StoryRss3.xml",
   },
   {
     sourceId: "bbc",
     sourceName: "BBC Sport",
     sourceLang: "en",
+    isInternational: true,
     url: "https://feeds.bbci.co.uk/sport/football/rss.xml",
   },
   {
     sourceId: "espn",
     sourceName: "ESPN NBA",
     sourceLang: "en",
+    isInternational: true,
     url: "https://www.espn.com/espn/rss/nba/news",
   },
 ];
 
-// Dynamic Content Classifier: Analyzes actual text to identify sport & competition
-function classifySportAndCompetition(headline, text, defaultCategoryHint) {
+// Scrape Sport5 top articles directly
+async function fetchSport5Articles() {
+  try {
+    console.log("Scraping Sport5 homepage...");
+    const res = await fetch("https://www.sport5.co.il", {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    const articles = [];
+    const seenHrefs = new Set();
+
+    $("a").each((i, el) => {
+      const href = $(el).attr("href") || "";
+      const rawText = $(el).text().replace(/\s+/g, " ").trim();
+      if (
+        href.includes("/articles.aspx?FolderID=") &&
+        rawText.length > 20 &&
+        !seenHrefs.has(href) &&
+        articles.length < 6
+      ) {
+        seenHrefs.add(href);
+        const fullUrl = href.startsWith("http") ? href : `https://www.sport5.co.il${href}`;
+        // Look for image inside
+        const img = $(el).find("img").attr("src") || $(el).closest("div").find("img").attr("src") || "";
+        articles.push({
+          sourceId: "sport5",
+          sourceName: "ספורט 5",
+          sourceLang: "he",
+          isInternational: false,
+          headline: rawText.split("\n")[0].trim().slice(0, 110),
+          excerpt: rawText.slice(0, 200),
+          originalUrl: fullUrl,
+          imageUrl: img.startsWith("http") ? img : img ? `https://www.sport5.co.il${img}` : "",
+          publishedAt: "עכשיו",
+          pubDateTimestamp: Date.now(),
+        });
+      }
+    });
+
+    console.log(`• Retrieved ${articles.length} items from Sport5`);
+    return articles;
+  } catch (err) {
+    console.warn("Sport5 fetch error:", err.message);
+    return [];
+  }
+}
+
+// Content Classifier: Classifies category and badge faithfully without false Israeli defaults
+function classifyContent(headline, text, isInternational, sourceId) {
   const combined = (headline + " " + text).toLowerCase();
 
-  // 1. Tennis & Global / Olympic sports
+  // 1. Tennis & Olympic / Individual World Sports
   if (
     combined.includes("טניס") ||
     combined.includes("מדורגת") ||
@@ -57,13 +113,17 @@ function classifySportAndCompetition(headline, text, defaultCategoryHint) {
     combined.includes("גראנד סלאם") ||
     combined.includes("wta") ||
     combined.includes("atp") ||
-    combined.includes("טורניר החשוב") ||
-    combined.includes("טניסאי")
+    combined.includes("מרתון") ||
+    combined.includes("ריצת")
   ) {
+    let badge = "ספורט עולמי";
+    if (combined.includes("טניס") || combined.includes("מדורגת")) badge = "טניס עולמי";
+    else if (combined.includes("מרתון") || combined.includes("ריצת")) badge = "אתלטיקה";
+
     return {
       category: "global-stories",
       categoryLabel: "טניס וספורט עולמי",
-      badge: "טניס עולמי",
+      badge,
     };
   }
 
@@ -72,9 +132,10 @@ function classifySportAndCompetition(headline, text, defaultCategoryHint) {
     combined.includes("חולון") ||
     combined.includes("קרוניץ'") ||
     combined.includes("קרוניץ") ||
-    combined.includes("ליגת ווינר סל") ||
+    combined.includes("ווינר סל") ||
+    combined.includes("הפועל י-ם") ||
     combined.includes("הפועל ירושלים") ||
-    (combined.includes("כדורסל") && !combined.includes("nba") && !combined.includes("יורוליג"))
+    (combined.includes("כדורסל") && !combined.includes("nba") && !combined.includes("אירופה"))
   ) {
     return {
       category: "israeli-basketball",
@@ -96,18 +157,17 @@ function classifySportAndCompetition(headline, text, defaultCategoryHint) {
     };
   }
 
-  // 4. NBA
+  // 4. NBA & US Basketball
   if (
+    sourceId === "espn" ||
     combined.includes("nba") ||
     combined.includes("דונצ'יץ'") ||
-    combined.includes("דונציץ") ||
     combined.includes("doncic") ||
     combined.includes("curry") ||
+    combined.includes("קרי") ||
     combined.includes("lebron") ||
     combined.includes("לייקרס") ||
-    combined.includes("גולדן סטייט") ||
-    combined.includes("סלטיקס") ||
-    combined.includes("סטף קרי")
+    combined.includes("סלטיקס")
   ) {
     return {
       category: "nba",
@@ -116,25 +176,37 @@ function classifySportAndCompetition(headline, text, defaultCategoryHint) {
     };
   }
 
-  // 5. European / International Football
-  if (
+  // 5. World & European Football (Cristiano Ronaldo, Mo Salah, Rangers, Maresca, Liverpool, etc.)
+  const isWorldFootballKeyword =
+    combined.includes("רונאלדו") ||
+    combined.includes("כריסטיאנו") ||
+    combined.includes("מסי") ||
+    combined.includes("סאלח") ||
+    combined.includes("salah") ||
+    combined.includes("ריינג'רס") ||
+    combined.includes("rangers") ||
     combined.includes("fa cup") ||
     combined.includes("הגביע האנגלי") ||
     combined.includes("פרמייר ליג") ||
     combined.includes("premier league") ||
     combined.includes("ליגת האלופות") ||
     combined.includes("champions league") ||
-    combined.includes("סיטי") ||
-    combined.includes("ארסנל") ||
-    combined.includes("ליברפול") ||
     combined.includes("ריאל מדריד") ||
     combined.includes("ברצלונה") ||
-    combined.includes("maresca")
-  ) {
-    let badge = "אירופה ומפעלים";
+    combined.includes("ליברפול") ||
+    combined.includes("סיטי") ||
+    combined.includes("ארסנל") ||
+    combined.includes("סקוטלנד") ||
+    combined.includes("scotland") ||
+    combined.includes("maresca");
+
+  if (isInternational || isWorldFootballKeyword) {
+    let badge = "כדורגל עולמי";
     if (combined.includes("fa cup") || combined.includes("הגביע האנגלי")) badge = "הגביע האנגלי • FA Cup";
-    else if (combined.includes("premier league") || combined.includes("פרמייר ליג") || combined.includes("maresca")) badge = "פרמייר ליג";
-    else if (combined.includes("champions league") || combined.includes("אלופות")) badge = "ליגת האלופות";
+    else if (combined.includes("ריינג'רס") || combined.includes("rangers")) badge = "סקוטלנד • Rangers";
+    else if (combined.includes("פרמייר ליג") || combined.includes("premier league") || combined.includes("maresca") || combined.includes("סאלח") || combined.includes("salah")) badge = "פרמייר ליג";
+    else if (combined.includes("רונאלדו") || combined.includes("כריסטיאנו")) badge = "כדורגל עולמי • רונאלדו";
+    else if (combined.includes("אלופות") || combined.includes("champions")) badge = "ליגת האלופות";
 
     return {
       category: "uefa-tournaments",
@@ -143,7 +215,7 @@ function classifySportAndCompetition(headline, text, defaultCategoryHint) {
     };
   }
 
-  // 6. Israeli Football (Default for Israeli football feeds)
+  // 6. Israeli Football
   return {
     category: "israeli-football",
     categoryLabel: "כדורגל ישראלי",
@@ -151,32 +223,30 @@ function classifySportAndCompetition(headline, text, defaultCategoryHint) {
   };
 }
 
-// Dynamic Editorial Signal: Is it an in-depth story / magazine piece, or a short breaking update?
+// Determine Story Type: In-depth Story / Feature vs. Short Breaking News
 function determineStoryType(headline, paragraphs) {
   const text = (headline + " " + paragraphs.join(" ")).toLowerCase();
   const totalLength = paragraphs.join(" ").length;
 
-  const isEditorialTitle =
+  const isEditorial =
     text.includes("ריאיון") ||
     text.includes("ראיון") ||
     text.includes("טור דעה") ||
     text.includes("טור:") ||
+    text.includes("שיעור באלכימיה") ||
     text.includes("ניתוח") ||
     text.includes("מאחורי הקלעים") ||
-    text.includes("תחקיר") ||
-    text.includes("הסיפור הבלתי") ||
-    text.includes("ההזדמנות של") ||
-    text.includes("להוכיח למבקרים") ||
+    text.includes("מיוחד:") ||
+    text.includes("אובריגדו") ||
+    text.includes("הסיפור") ||
     text.includes("inside") ||
-    text.includes("analysis") ||
-    text.includes("feature");
+    text.includes("analysis");
 
-  // If long read (> 5 paragraphs or > 1200 characters) OR has editorial signals
-  if (paragraphs.length >= 5 || totalLength > 1200 || isEditorialTitle) {
-    return "story"; // In-depth magazine / feature story (Retained for 7 days)
+  if (paragraphs.length >= 5 || totalLength > 1100 || isEditorial) {
+    return "story"; // Magazine / Story -> TTL 7 days
   }
 
-  return "breaking"; // Breaking update / short news (Retained for 12 hours)
+  return "breaking"; // Breaking update -> TTL 12 hours
 }
 
 // Extract full article paragraphs using Mozilla Readability
@@ -202,7 +272,7 @@ async function extractFullArticle(url) {
     const $ = cheerio.load(parsed?.content || html);
     $("script, style, noscript, nav, header, footer, .ad-banner, .comments").remove();
 
-    const pList = $("p, .text-content, .text-block, [itemprop='articleBody'] p")
+    const pList = $("p, .text-content, .text-block, [itemprop='articleBody'] p, .article-content p")
       .map((i, el) => $(el).text().replace(/\s+/g, " ").trim())
       .get()
       .filter(t => t.length > 25 && !t.includes("cookie") && !t.includes("להורדת האפליקציה") && !t.includes("כל הזכויות"));
@@ -213,41 +283,47 @@ async function extractFullArticle(url) {
   }
 }
 
-// Extract key named entities for cross-source matching
-function extractEntities(headline, text) {
-  const combined = (headline + " " + text).toLowerCase();
-  const found = new Set();
+// STRICT Entity Extraction from HEADLINE ONLY (Prevents mixing Doncic with Curry!)
+function extractPrimaryHeadlineEntity(headline) {
+  const h = headline.toLowerCase();
 
-  const ENTITY_DICTIONARY = [
-    { key: "doncic", match: ["דונצ'יץ'", "דונציץ", "doncic", "luka"] },
-    { key: "curry", match: ["קרי", "curry", "stephen curry", "סטף קרי"] },
-    { key: "lebron", match: ["לברון", "ג'יימס", "lebron"] },
-    { key: "hapoel_ta", match: ["הפועל תל אביב", "הפועל ת\"א", "הפועל ת'א", "אליניב ברדה", "ברדה"] },
-    { key: "dego_rg", match: ["מסאי דגו", "ברוך דגו", "דגו", "הפועל רמת גן", "הפועל ר\"ג"] },
-    { key: "holon_krunic", match: ["קרוניץ'", "קרוניץ", "הפועל חולון", "פרדראג"] },
-    { key: "daniel_peretz", match: ["דניאל פרץ", "פרץ", "צור עשה"] },
-    { key: "maresca", match: ["maresca", "מרסקה"] },
-    { key: "bachar", match: ["בכר", "ברק בכר"] },
-    { key: "tennis_no1", match: ["מדורגת מספר 1", "המדורגת מספר", "פרשה מהטורניר"] },
-  ];
+  // NBA distinct players:
+  if (h.includes("דונצ'יץ'") || h.includes("דונציץ") || h.includes("doncic")) return "doncic";
+  if (h.includes("קרי") || h.includes("curry")) return "curry";
+  if (h.includes("לברון") || h.includes("james") || h.includes("lebron")) return "lebron";
+  if (h.includes("פורזינגיס") || h.includes("porzingis")) return "porzingis";
 
-  for (const ent of ENTITY_DICTIONARY) {
-    for (const m of ent.match) {
-      if (combined.includes(m)) {
-        found.add(ent.key);
-        break;
-      }
-    }
-  }
+  // Israeli football / coaches:
+  if (h.includes("הפועל תל אביב") || h.includes("הפועל ת\"א") || h.includes("הפועל ת'א")) return "hapoel_ta";
+  if (h.includes("מסאי דגו") || h.includes("ברוך דגו") || (h.includes("דגו") && h.includes("רמת גן"))) return "dego";
+  if (h.includes("דניאל פרץ") || (h.includes("פרץ") && h.includes("צור"))) return "daniel_peretz";
+  if (h.includes("בכר") || h.includes("ברק בכר")) return "barak_bachar";
+  if (h.includes("יצחקי") || h.includes("ברק יצחקי")) return "itzhaki";
+  if (h.includes("באר שבע") || h.includes("ב\"ש")) return "hapoel_bs";
+  if (h.includes("חיפה") && h.includes("עודה")) return "hapoel_haifa_ref";
 
-  return Array.from(found);
+  // Basketball:
+  if (h.includes("חולון") || h.includes("קרוניץ'") || h.includes("קרוניץ")) return "holon_krunic";
+
+  // European / World football:
+  if (h.includes("maresca") || h.includes("מרסקה")) return "maresca";
+  if (h.includes("רונאלדו") || h.includes("כריסטיאנו")) return "ronaldo";
+  if (h.includes("סאלח") || h.includes("salah")) return "salah";
+  if (h.includes("ריינג'רס") || h.includes("rangers")) return "rangers";
+  if (h.includes("fa cup") || h.includes("הגביע האנגלי")) return "fa_cup";
+
+  // Tennis:
+  if (h.includes("המדורגת מספר 1") || h.includes("המדורגת מספר") || h.includes("פרשה מהטורניר")) return "tennis_no1";
+
+  return null;
 }
 
 async function run() {
-  console.log("=== Running Dynamic Sports Ingestion & Retention Engine ===");
+  console.log("=== SportPulse Advanced Scraping, Clustering & Retention Engine ===");
 
   const rawArticles = [];
 
+  // 1. Fetch RSS feeds (Walla, Ynet, BBC, ESPN)
   for (const feed of FEEDS) {
     try {
       console.log(`Scanning: ${feed.sourceName}...`);
@@ -276,6 +352,7 @@ async function run() {
             sourceId: feed.sourceId,
             sourceName: feed.sourceName,
             sourceLang: feed.sourceLang,
+            isInternational: feed.isInternational,
             headline,
             excerpt,
             originalUrl,
@@ -290,26 +367,33 @@ async function run() {
     }
   }
 
-  console.log(`Gathered ${rawArticles.length} raw items. Extracting full text via Readability...`);
+  // 2. Fetch Sport5 articles
+  const sport5Articles = await fetchSport5Articles();
+  rawArticles.push(...sport5Articles);
 
+  console.log(`Gathered ${rawArticles.length} raw articles. Extracting full text via Readability...`);
+
+  // Extract full paragraphs and classify
   for (const art of rawArticles) {
     const fullParagraphs = await extractFullArticle(art.originalUrl);
     art.contentParagraphs = fullParagraphs.length > 0 ? fullParagraphs : [art.excerpt];
 
-    // Dynamic Content Classification: Based on actual article text, not the feed!
-    const classification = classifySportAndCompetition(art.headline, art.excerpt + " " + (art.contentParagraphs[0] || ""));
+    // Accurate category & badge classification (No broken fallbacks!)
+    const classification = classifyContent(art.headline, art.excerpt, art.isInternational, art.sourceId);
     art.category = classification.category;
     art.categoryLabel = classification.categoryLabel;
     art.badge = classification.badge;
 
-    // Dynamic Story vs Breaking Classification:
+    // Editorial vs Breaking classification
     art.storyType = determineStoryType(art.headline, art.contentParagraphs);
 
-    art.entities = extractEntities(art.headline, art.excerpt);
-    console.log(`• [${art.sourceName}] "${art.headline.slice(0, 32)}..." -> [${art.categoryLabel}] [${art.storyType.toUpperCase()}]`);
+    // Primary entity from HEADLINE ONLY (strictly avoids mixing Doncic & Curry!)
+    art.primaryEntity = extractPrimaryHeadlineEntity(art.headline);
+
+    console.log(`• [${art.sourceName}] "${art.headline.slice(0, 32)}..." -> [${art.categoryLabel}] [${art.badge}] [${art.storyType.toUpperCase()}]`);
   }
 
-  console.log("Clustering based on shared entities and topic context...");
+  console.log("Clustering based strictly on Primary Headline Entities...");
 
   const clusteredStories = [];
   const processedArticles = new Set();
@@ -321,26 +405,24 @@ async function run() {
 
     const matchingArticles = [current];
 
-    // Look for matching sibling articles
-    if (current.entities.length > 0) {
+    // Merge siblings ONLY if they share the exact primary headline entity
+    if (current.primaryEntity) {
       for (let j = i + 1; j < rawArticles.length; j++) {
         if (processedArticles.has(j)) continue;
         const candidate = rawArticles[j];
 
-        // Match if they share an entity AND category, and are from different sources
-        const shareEntity = current.entities.some(e => candidate.entities.includes(e));
-        if (shareEntity && candidate.sourceId !== current.sourceId) {
+        if (
+          candidate.primaryEntity === current.primaryEntity &&
+          candidate.sourceId !== current.sourceId
+        ) {
           matchingArticles.push(candidate);
           processedArticles.add(j);
-          console.log(`  🔗 MATCHED: [${current.sourceName}] + [${candidate.sourceName}] on entity ${current.entities.join(", ")}`);
+          console.log(`  🔗 STRICT MERGE [${current.primaryEntity}]: [${current.sourceName}] + [${candidate.sourceName}]`);
         }
       }
     }
 
     const storyId = `story-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-    const isMultiSource = matchingArticles.length > 1;
-
-    // If any source had in-depth story, upgrade cluster to story
     const finalStoryType = matchingArticles.some(a => a.storyType === "story") ? "story" : "breaking";
 
     clusteredStories.push({
@@ -361,47 +443,45 @@ async function run() {
 
   console.log(`Generated ${clusteredStories.length} strictly clustered stories.`);
 
-  // 12-Hour Retention Check for breaking news:
+  // 12-Hour Retention Policy for Breaking News
   const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
   const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
   const now = Date.now();
 
-  console.log("Executing Retention Policy (Breaking TTL: 12h, Magazine TTL: 7d)...");
+  console.log("Applying Retention Policy (Breaking: 12h, Magazine: 7d)...");
 
-  // Read existing stories from Firestore to delete expired items
   const existingDocs = await getDocs(collection(db, "stories"));
-  let deletedCount = 0;
+  let purgedCount = 0;
 
   for (const docSnap of existingDocs.docs) {
     const data = docSnap.data();
     const createdMs = data.createdAt?.toMillis?.() || 0;
     const age = now - createdMs;
 
+    // Purge breaking news after 12 hours
     if (data.storyType === "breaking" && age > TWELVE_HOURS_MS) {
       await deleteDoc(docSnap.ref);
-      deletedCount++;
+      purgedCount++;
     } else if (data.storyType === "story" && age > SEVEN_DAYS_MS) {
       await deleteDoc(docSnap.ref);
-      deletedCount++;
+      purgedCount++;
     }
   }
 
-  console.log(`Purged ${deletedCount} expired items older than their TTL.`);
-
-  // Clear remaining stale items to keep database strictly synchronized
+  // Clear stale items for a fresh synchronized feed
   for (const docSnap of existingDocs.docs) {
     await deleteDoc(docSnap.ref);
   }
 
-  // Save the fresh clustered stories
+  // Save new strictly validated stories
   for (let i = 0; i < clusteredStories.length; i++) {
     const story = clusteredStories[i];
     const storyRef = doc(db, "stories", story.id);
     await setDoc(storyRef, {
       ...story,
-      createdAt: Timestamp.fromMillis(now - i * 60000), // orderly chronological index
+      createdAt: Timestamp.fromMillis(now - i * 60000),
     });
-    console.log(`✓ Saved [${story.categoryLabel}] [${story.storyType}] "${story.headline.slice(0, 35)}..." (${story.articles.length} sources)`);
+    console.log(`✓ Saved [${story.categoryLabel}] [${story.competitionBadge}] [${story.storyType}] "${story.headline.slice(0, 35)}..." (${story.articles.length} sources)`);
   }
 
   console.log("=== Synchronization complete! ===");
@@ -409,6 +489,6 @@ async function run() {
 }
 
 run().catch(err => {
-  console.error("Fatal error:", err);
+  console.error("Fatal pipeline error:", err);
   process.exit(1);
 });
