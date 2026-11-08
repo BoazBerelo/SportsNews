@@ -52,8 +52,11 @@ export const StoryCard: React.FC<StoryCardProps> = ({ story, onOpenDetails }) =>
         onClick={() => onOpenDetails(story, currentArticle)}
       >
         <img
-          src={story.imageUrl}
+          src={story.imageUrl || "/default-story-bg.jpg"}
           alt={story.headline}
+          onError={(e) => {
+            e.currentTarget.src = "/default-story-bg.jpg";
+          }}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
           loading="lazy"
         />
