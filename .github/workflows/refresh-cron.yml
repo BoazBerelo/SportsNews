@@ -1,0 +1,27 @@
+name: Auto-Refresh Sports Feeds & Stories
+
+on:
+  schedule:
+    # Run every 30 minutes automatically
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    # Allows manual trigger anytime from GitHub Actions tab
+
+jobs:
+  refresh-and-cluster:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Fetch Feeds & Sync Clustered Stories to Firestore
+        run: node src/scripts/fetchAndCluster.mjs
